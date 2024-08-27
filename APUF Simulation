@@ -1,0 +1,183 @@
+% MATLAB Script to Create a Simulink Model for APUF with a Single Challenge Bit and Analyze it
+
+% Step 1: Create a New Simulink Model
+modelName = 'APUF_Single_Challenge_Simulation';
+open_system(new_system(modelName));
+
+% Parameters
+n = 1; % Number of challenge bits (set to 1)
+num_tests = 10; % Number of test cases
+
+% Add Constant block for the Single Challenge Bit
+xpos = 100; % Initial x-position for placing blocks
+ypos = 100; % Initial y-position for placing blocks
+
+blockName = sprintf('C1');
+add_block('simulink/Sources/Constant', [modelName, '/', blockName], ...
+    'Position', [xpos, ypos, xpos+50, ypos+30], ...
+    'Value', num2str(randi([0, 1]))); % Random challenge bit (0 or 1)
+
+% Add Gain block to simulate the weight with variation
+blockNameGain = sprintf('Gain1');
+add_block('simulink/Math Operations/Gain', [modelName, '/', blockNameGain], ...
+    'Position', [xpos+150, ypos, xpos+200, ypos+30], ...
+    'Gain', num2str(randn() + 0.15 * randn())); % Gain with manufacturing variation
+
+% Add Random Number block to simulate environmental noise
+add_block('simulink/Sources/Random Number', [modelName, '/Noise'], ...
+    'Position', [xpos+300, ypos, xpos+350, ypos+30], ...
+    'Mean', '0', 'Variance', '0.1'); % Base noise level and voltage variation
+
+% Add Sum block to combine the weighted challenge and noise
+add_block('simulink/Math Operations/Sum', [modelName, '/SumNoise'], ...
+    'Position', [xpos+450, ypos, xpos+500, ypos+30], ...
+    'Inputs', '++'); % Sum block to combine the challenge and noise
+
+% Add Comparator block for the arbiter decision
+add_block('simulink/Logic and Bit Operations/Compare To Zero', [modelName, '/Comparator'], ...
+    'Position', [xpos+600, ypos, xpos+650, ypos+30]);
+
+% Add To Workspace block to save the response in MATLAB workspace
+add_block('simulink/Sinks/To Workspace', [modelName, '/Response'], ...
+    'Position', [xpos+750, ypos, xpos+800, ypos+30], ...
+    'VariableName', 'responses', 'SaveFormat', 'Structure');
+
+% Step 2: Connect the Blocks
+% Connect the Constant block to the Gain Block
+add_line(modelName, 'C1/1', 'Gain1/1');
+
+% Connect Gain Block to Sum Block
+add_line(modelName, 'Gain1/1', 'SumNoise/1');
+
+% Connect Noise Block to Sum Block
+add_line(modelName, 'Noise/1', 'SumNoise/2');
+
+% Connect Sum Block to Comparator
+add_line(modelName, 'SumNoise/1', 'Comparator/1');
+
+% Connect Comparator to To Workspace block
+add_line(modelName, 'Comparator/1', 'Response/1');
+
+% Step 3: Run the Simulation
+
+% Set simulation time
+set_param(modelName, 'StopTime', '10');
+
+% Run the simulation
+simOut = sim(modelName);
+
+% Capture the output for further analysis
+responses = simOut.get('responses').signals.values;
+
+% Step 4: Analyze the Results in MATLAB
+
+% Generate Random Challenges for Analysis
+challenges = randi([0, 1], num_tests, n); % Generate random challenges
+disp('Challenges:');
+disp(challenges);
+
+% Transform Challenges to Feature Vectors
+Psi = zeros(num_tests, n+1); % Preallocate for feature vectors
+for i = 1:num_tests
+    c = challenges(i, :);
+    for j = 1:n
+        Psi(i, j) = prod(1 - 2*c(j:n)); % Compute Ψ[i]
+    end
+    Psi(i, n+1) = 1; % Ψ[n] = 1
+end
+disp('Feature Vectors (Psi):');
+disp(Psi);
+
+% Simulate Environmental Effects (Noise)
+base_noise_level = 0.1; % Base noise level for thermal noise
+voltage_variation = 0.05; % Simulating supply voltage variations
+manufacturing_variation = 0.15; % Simulating larger process variations
+environmental_noise = base_noise_level + voltage_variation * randn(num_tests, 1);
+
+% Compute PUF Responses with Noise
+delta = (Psi * randn(n+1, 1)) + environmental_noise; % Compute the delta values with noise
+responses_matlab = delta < 0; % Compute responses (r = 0 if ∆ >= 0, otherwise r = 1)
+disp('Responses:');
+disp(responses_matlab);
+
+% Simulate Noisy Responses for Training (with more complex noise)
+noisy_responses = responses_matlab;
+for i = 1:num_tests
+    if rand < (base_noise_level + voltage_variation * abs(randn))
+        noisy_responses(i) = ~responses_matlab(i); % Flip response with probability based on complex noise
+    end
+end
+disp('Noisy Responses:');
+disp(noisy_responses);
+
+% Analyze Noise and Reliability
+noise_analysis = sum(responses_matlab ~= noisy_responses) / num_tests;
+reliability = 1 - noise_analysis;
+disp(['Noise Analysis (Error Rate): ', num2str(noise_analysis * 100), '%']);
+disp(['Reliability: ', num2str(reliability * 100), '%']);
+
+% Test Model Accuracy
+model_accuracy = sum(responses_matlab == noisy_responses) / num_tests;
+disp(['Model Accuracy: ', num2str(model_accuracy * 100), '%']);
+
+% Simulate Uniqueness (for simplicity, use variation on weight vector)
+uniqueness_variation = randn(1, n+1) * manufacturing_variation;
+w_unique = randn(n+1, 1) + uniqueness_variation; % A slightly different PUF instance
+delta_unique = (Psi * w_unique') + environmental_noise;
+unique_responses = delta_unique < 0;
+
+% Evaluate Uniqueness
+uniqueness = sum(responses_matlab ~= unique_responses) / num_tests;
+disp(['Uniqueness: ', num2str(uniqueness * 100), '%']);
+
+% Final Matching Rate Evaluation
+matching_rate = sum(responses_matlab == noisy_responses) / num_tests;
+disp(['Final Matching Rate: ', num2str(matching_rate * 100), '%']);
+
+% Plotting Results
+
+% Waveform of Challenges
+figure;
+subplot(3,2,1);
+plot(challenges, 'o-');
+title('Challenges (Waveform)');
+xlabel('Test Case');
+ylabel('Challenge Bit');
+
+% Waveform of Responses
+subplot(3,2,2);
+plot(responses_matlab, 'o-');
+title('Responses (Waveform)');
+xlabel('Test Case');
+ylabel('Response');
+
+% Waveform of Environmental Noise
+subplot(3,2,3);
+plot(environmental_noise, 'o-');
+title('Environmental Noise (Waveform)');
+xlabel('Test Case');
+ylabel('Noise');
+
+% Noise Analysis and Reliability Plot
+subplot(3,2,4);
+bar([noise_analysis * 100, reliability * 100]);
+title('Noise Analysis and Reliability');
+ylabel('Percentage');
+set(gca, 'XTickLabel', {'Error Rate', 'Reliability'});
+
+% Model Accuracy Plot
+subplot(3,2,5);
+bar(model_accuracy * 100);
+title('Model Accuracy');
+ylabel('Accuracy (%)');
+set(gca, 'XTickLabel', {'Accuracy'});
+
+% Uniqueness and Matching Rate Plot
+subplot(3,2,6);
+bar([uniqueness * 100, matching_rate * 100]);
+title('Uniqueness and Final Matching Rate');
+ylabel('Percentage');
+set(gca, 'XTickLabel', {'Uniqueness', 'Matching Rate'});
+
+% Save the model without closing it
+save_system(modelName);
