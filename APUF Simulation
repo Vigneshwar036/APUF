@@ -1,59 +1,76 @@
-% MATLAB Script to Create a Simulink Model for APUF with a Single Challenge Bit and Analyze it
+% MATLAB Script to Create a Simulink Model for APUF with Multiple Challenge Bits and Analyze it
 
 % Step 1: Create a New Simulink Model
-modelName = 'APUF_Single_Challenge_Simulation';
+modelName = 'APUF_MUX_Simulation';
 open_system(new_system(modelName));
 
 % Parameters
-n = 1; % Number of challenge bits (set to 1)
+n = 4; % Number of challenge bits
 num_tests = 10; % Number of test cases
 
-% Add Constant block for the Single Challenge Bit
+% Positioning parameters
 xpos = 100; % Initial x-position for placing blocks
 ypos = 100; % Initial y-position for placing blocks
+blockSpacing = 60; % Vertical spacing between blocks
 
-blockName = sprintf('C1');
-add_block('simulink/Sources/Constant', [modelName, '/', blockName], ...
-    'Position', [xpos, ypos, xpos+50, ypos+30], ...
-    'Value', num2str(randi([0, 1]))); % Random challenge bit (0 or 1)
+% Step 2: Add Blocks
+% Add Constant blocks for each Challenge Bit and the MUX
+mux_inputs = cell(1, n);
+for i = 1:n
+    blockName = sprintf('C%d', i);
+    add_block('simulink/Sources/Constant', [modelName, '/', blockName], ...
+        'Position', [xpos, ypos + (i-1)*blockSpacing, xpos+50, ypos+30 + (i-1)*blockSpacing], ...
+        'Value', num2str(randi([0, 1]))); % Random challenge bit (0 or 1)
+    mux_inputs{i} = [blockName, '/1'];
+end
+
+% Add MUX block to combine challenge bits
+mux_name = 'MUX';
+add_block('simulink/Signal Routing/Mux', [modelName, '/', mux_name], ...
+    'Position', [xpos+150, ypos, xpos+200, ypos+30 + (n-1)*blockSpacing], ...
+    'Inputs', num2str(n)); % Number of inputs to MUX
+
+% Connect all Challenge blocks to MUX
+for i = 1:n
+    add_line(modelName, mux_inputs{i}, [mux_name, '/', num2str(i)]);
+end
 
 % Add Gain block to simulate the weight with variation
-blockNameGain = sprintf('Gain1');
+blockNameGain = 'Gain';
 add_block('simulink/Math Operations/Gain', [modelName, '/', blockNameGain], ...
-    'Position', [xpos+150, ypos, xpos+200, ypos+30], ...
+    'Position', [xpos+300, ypos + (n-1)*blockSpacing/2, xpos+350, ypos+30 + (n-1)*blockSpacing/2], ...
     'Gain', num2str(randn() + 0.15 * randn())); % Gain with manufacturing variation
+
+% Connect MUX output to Gain input
+add_line(modelName, [mux_name, '/1'], [blockNameGain, '/1']);
 
 % Add Random Number block to simulate environmental noise
 add_block('simulink/Sources/Random Number', [modelName, '/Noise'], ...
-    'Position', [xpos+300, ypos, xpos+350, ypos+30], ...
+    'Position', [xpos+450, ypos + (n-1)*blockSpacing/2, xpos+500, ypos+30 + (n-1)*blockSpacing/2], ...
     'Mean', '0', 'Variance', '0.1'); % Base noise level and voltage variation
 
 % Add Sum block to combine the weighted challenge and noise
-add_block('simulink/Math Operations/Sum', [modelName, '/SumNoise'], ...
-    'Position', [xpos+450, ypos, xpos+500, ypos+30], ...
+add_block('simulink/Math Operations/Sum', [modelName, '/Sum'], ...
+    'Position', [xpos+600, ypos + (n-1)*blockSpacing/2, xpos+650, ypos+30 + (n-1)*blockSpacing/2], ...
     'Inputs', '++'); % Sum block to combine the challenge and noise
+
+% Connect Gain output to Sum input
+add_line(modelName, [blockNameGain, '/1'], 'Sum/1');
+
+% Connect Noise to Sum input
+add_line(modelName, 'Noise/1', 'Sum/2');
 
 % Add Comparator block for the arbiter decision
 add_block('simulink/Logic and Bit Operations/Compare To Zero', [modelName, '/Comparator'], ...
-    'Position', [xpos+600, ypos, xpos+650, ypos+30]);
+    'Position', [xpos+750, ypos + (n-1)*blockSpacing/2, xpos+800, ypos+30 + (n-1)*blockSpacing/2]);
+
+% Connect Sum output to Comparator input
+add_line(modelName, 'Sum/1', 'Comparator/1');
 
 % Add To Workspace block to save the response in MATLAB workspace
 add_block('simulink/Sinks/To Workspace', [modelName, '/Response'], ...
-    'Position', [xpos+750, ypos, xpos+800, ypos+30], ...
+    'Position', [xpos+900, ypos + (n-1)*blockSpacing/2, xpos+950, ypos+30 + (n-1)*blockSpacing/2], ...
     'VariableName', 'responses', 'SaveFormat', 'Structure');
-
-% Step 2: Connect the Blocks
-% Connect the Constant block to the Gain Block
-add_line(modelName, 'C1/1', 'Gain1/1');
-
-% Connect Gain Block to Sum Block
-add_line(modelName, 'Gain1/1', 'SumNoise/1');
-
-% Connect Noise Block to Sum Block
-add_line(modelName, 'Noise/1', 'SumNoise/2');
-
-% Connect Sum Block to Comparator
-add_line(modelName, 'SumNoise/1', 'Comparator/1');
 
 % Connect Comparator to To Workspace block
 add_line(modelName, 'Comparator/1', 'Response/1');
