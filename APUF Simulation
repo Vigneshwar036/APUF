@@ -1,7 +1,7 @@
 % MATLAB Script to Create a Simulink Model for APUF with Multiple Challenge Bits and Analyze it
 
 % Step 1: Create a New Simulink Model
-modelName = 'APUF_MUX_Simulation';
+modelName = 'APUF_MUX_Simulation1';
 open_system(new_system(modelName));
 
 % Parameters
@@ -195,6 +195,19 @@ bar([uniqueness * 100, matching_rate * 100]);
 title('Uniqueness and Final Matching Rate');
 ylabel('Percentage');
 set(gca, 'XTickLabel', {'Uniqueness', 'Matching Rate'});
+
+% Plot PUF Responses vs Noisy Responses
+figure;
+plot(1:num_tests, responses_matlab, 'o-', 'DisplayName', 'PUF Responses');
+hold on;
+plot(1:num_tests, noisy_responses, 'x--', 'DisplayName', 'Noisy Responses');
+xlabel('Test Case');
+ylabel('Response');
+title('PUF Responses vs Noisy Responses');
+legend('show');
+grid on;
+
+
 
 % Save the model without closing it
 save_system(modelName);
